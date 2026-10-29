@@ -483,6 +483,9 @@ a{ color:inherit; }
 .stage3d .stage-hint{ position:absolute; z-index:2; left:50%; bottom:6px; translate:-50% 0; display:inline-flex; gap:8px; align-items:center; pointer-events:none; opacity:0; transition:opacity .6s ease .6s; }
 .stage3d .stage-hint{ max-width:calc(100% - 24px); height:auto; min-height:30px; padding:6px 12px; white-space:normal; text-align:center; justify-content:center; }
 .stage3d.listo .stage-hint{ opacity:1; }
+/* estado de fallo: el placeholder queda visible y no se promete interacción sobre un stage vacío */
+.stage3d.fallo .skeleton{ opacity:1; pointer-events:none; }
+.stage3d.fallo .stage-hint{ opacity:0; transition-delay:0s; }
 .stage3d.interacting .stage-hint{ opacity:0; transition-delay:0s; }
 /* celular: el hint del 3D no debe tapar el modelo en un stage chico */
 @media (max-width:620px){ .stage3d .stage-hint{ font-size:11px; line-height:1.35; padding:5px 10px; gap:6px; min-height:0; max-width:calc(100% - 16px); } .stage3d .stage-hint .hint-more{ display:none; } }
@@ -1088,12 +1091,13 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
       btn.addEventListener('click', function(){
         var open = nav.classList.toggle('open');
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
       });
       links.addEventListener('click', function(e){
-        if(e.target.closest('a')){ nav.classList.remove('open'); btn.setAttribute('aria-expanded','false'); }
+        if(e.target.closest('a')){ nav.classList.remove('open'); btn.setAttribute('aria-expanded','false'); btn.setAttribute('aria-label','Abrir menú'); }
       });
       document.addEventListener('keydown', function(e){
-        if(e.key === 'Escape' && nav.classList.contains('open')){ nav.classList.remove('open'); btn.setAttribute('aria-expanded','false'); btn.focus(); }
+        if(e.key === 'Escape' && nav.classList.contains('open')){ nav.classList.remove('open'); btn.setAttribute('aria-expanded','false'); btn.setAttribute('aria-label','Abrir menú'); btn.focus(); }
       });
     }
     // fondo oscuro mientras el nav está sobre una sección .theme-dark
@@ -1109,6 +1113,7 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
       }
     }
     window.addEventListener('scroll', function(){ if(!ticking){ ticking = true; requestAnimationFrame(onScroll); } }, { passive:true });
+    window.addEventListener('resize', function(){ if(!ticking){ ticking = true; requestAnimationFrame(onScroll); } }, { passive:true });
     onScroll();
 
     if(links && 'IntersectionObserver' in window){
@@ -1310,23 +1315,34 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
 
   /* ---- MODELO 3D (carga diferida, mismo visor del index original) ---- */
   var CLEAN_CSS = 'html,body{height:100%!important;margin:0!important;overflow:hidden!important;background:transparent!important}.g1-raiz{--escena:transparent!important;display:block!important;height:100%!important;min-height:0!important}.g1-raiz>main{position:absolute!important;inset:0!important;background:transparent!important}.g1-raiz>main>.g1-canvas{background:transparent!important}.g1-aside,.g1-titulo,.g1-ayuda,#__bundler_err,#__bundler_loading{display:none!important}';
+  var modelHTMLCache = null;
   function modelHTML(){
+    if(modelHTMLCache) return modelHTMLCache;
     var bin = window.atob(window.MODELO3D_HERO_B64), bytes = new Uint8Array(bin.length);
     for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
+    return (modelHTMLCache = new TextDecoder().decode(bytes));
+  }
+  /* decodificación anticipada en un momento idle: al llegar al stage ya está lista */
+  function precalcularModelo(){
+    if(modelHTMLCache || !window.MODELO3D_HERO_B64) return;
+    var run = function(){ try{ modelHTML(); }catch(e){ console.warn('3D precalc:', e); } };
+    if('requestIdleCallback' in window) requestIdleCallback(run, { timeout:3000 });
+    else setTimeout(run, 1500);
   }
   function findBtn(doc, pat){
     var bs = doc.querySelectorAll('button.g1-btn');
     for(var i = 0; i < bs.length; i++){ if((bs[i].textContent || '').replace(/\s+/g,' ').trim().toUpperCase().indexOf(pat) >= 0) return bs[i]; }
     return null;
   }
+  var frameCargado = false;
   function mount3D(stage){
     var frame = document.createElement('iframe');
     frame.title = stage.getAttribute('data-title') || 'Modelo 3D del gabinete del Nivel 1';
-    frame.setAttribute('loading', 'lazy');
+    frame.setAttribute('loading', 'eager');
     stage.appendChild(frame);
     function ready(){ stage.classList.add('listo'); stage.dispatchEvent(new CustomEvent('stage:ready', { bubbles:true })); }
     frame.addEventListener('load', function(){
+      frameCargado = true;
       var doc;
       try{ doc = frame.contentDocument; }catch(e){ ready(); return; }
       if(!doc) { ready(); return; }
@@ -1348,7 +1364,7 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
           try{
             if((tapa.textContent || '').trim().indexOf('Abrir') === 0) tapa.click();
             if(nombres.getAttribute('aria-pressed') === 'true') nombres.click();
-          }catch(e){}
+          }catch(e){ console.warn('3D auto-config:', e); }
           setTimeout(ready, 250);
         } else if(tries > 45){ clearInterval(poll); ready(); }
       }, 200);
@@ -1372,10 +1388,10 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
     if(stage.hasAttribute('data-eager')){
       if('requestIdleCallback' in window) requestIdleCallback(load, { timeout:900 }); else setTimeout(load, 60);
     } else if('IntersectionObserver' in window){
-      var io = new IntersectionObserver(function(en){ if(en[0].isIntersecting){ io.disconnect(); load(); } }, { rootMargin:'400px 0px' });
+      var io = new IntersectionObserver(function(en){ if(en[0].isIntersecting){ io.disconnect(); load(); } }, { rootMargin:'2400px 0px' });
       io.observe(stage);
     } else load();
-    setTimeout(function(){ if(loaded && !stage.classList.contains('listo')) stage.classList.add('listo'); }, 14000);
+    setTimeout(function(){ if(loaded && !stage.classList.contains('listo')){ stage.classList.add('listo'); if(!frameCargado) stage.classList.add('fallo'); } }, 14000);
   }
 
   /* ---- PASOS: tabs con auto-avance y progreso ---- */
@@ -1384,6 +1400,7 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
       var list = root.querySelector('.steps');
       var tabs = Array.prototype.slice.call(root.querySelectorAll('.step'));
       var figs = Array.prototype.slice.call(root.querySelectorAll('.step-screens figure'));
+      if(!list || !tabs.length) return;
       var ms = 6500, cur = 0, timer = null, paused = false;
       list.style.setProperty('--step-ms', ms + 'ms');
       function go(i, focus){
@@ -1439,7 +1456,7 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
     });
   }
 
-  function boot(){ initNav(); initReveal(); initPatterns(); initControls(); initCounters(); initSteps(); initSwatches(); initForm(); init3D(); }
+  function boot(){ initNav(); initReveal(); initPatterns(); initControls(); initCounters(); initSteps(); initSwatches(); initForm(); init3D(); precalcularModelo(); }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
 
@@ -1486,8 +1503,9 @@ window.MODELO3D_HERO_B64="PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaG
   function stop(){ running = false; clearInterval(timer); }
   size();
   window.addEventListener('resize', size);
-  new IntersectionObserver(function(en){ en[0].isIntersecting ? start() : stop(); }).observe(cv);
-  document.addEventListener('visibilitychange', function(){ document.hidden ? stop() : start(); });
+  var enPantalla = false;
+  new IntersectionObserver(function(en){ enPantalla = en[0].isIntersecting; if(enPantalla) start(); else stop(); }).observe(cv);
+  document.addEventListener('visibilitychange', function(){ if(document.hidden) stop(); else if(enPantalla) start(); });
 
   // ---- Capítulos ----
   var chapters = document.querySelectorAll('.chapter');
